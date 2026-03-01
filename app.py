@@ -213,3 +213,4 @@ if st.button("Predict"):
         st.write(ngo.groupby("Cluster")["NGO_Name"].apply(list))
 
 
+
