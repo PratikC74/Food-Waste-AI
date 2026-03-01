@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.cluster import KMeans
@@ -151,11 +150,8 @@ if st.button("Predict"):
     st.progress(min(int(surplus), 100))
 
     # Bar Chart
-    st.markdown("### 📉 Surplus Visualization")
-    fig, ax = plt.subplots()
-    ax.bar(["Predicted Surplus"], [surplus])
-    ax.set_ylabel("Kg")
-    st.pyplot(fig)
+    st.markdown("### 📊 Surplus Visualization")
+    st.bar_chart([surplus])
 
     # -----------------------------
     # Find Nearest NGO
@@ -211,5 +207,6 @@ if st.button("Predict"):
 
         st.subheader("📍 NGO Clusters:")
         st.write(ngo.groupby("Cluster")["NGO_Name"].apply(list))
+
 
 
