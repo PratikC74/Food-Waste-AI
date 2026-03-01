@@ -226,7 +226,7 @@ if st.button("🔮 Predict", use_container_width=True):
 
     # Map - Nearest NGO
     nearest_map = pd.DataFrame({
-        "latitude": [nearest_ngo["lat}],
+        "latitude": [nearest_ngo["lat"]],
         "longitude": [nearest_ngo["lon"]],
         "name": ["Nearest NGO"]
     })
