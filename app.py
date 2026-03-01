@@ -7,15 +7,14 @@ from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
 
 
-
-# 1️⃣ Page Configuration (FIRST)
+# 1️⃣ Page Configuration (FIRST) - ONLY ONCE
 st.set_page_config(
     page_title="Food Waste AI",
     page_icon="🍱",
     layout="wide"
 )
 
-# 2️⃣ 👉 ADD UI STYLING HERE 👇
+# 2️⃣ ADD UI STYLING HERE
 st.markdown("""
 <style>
 /* Background */
@@ -43,7 +42,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 3️⃣ THEN start your app UI
+# 3️⃣ Start app UI
 st.title("🍱 AI-Based Food Waste Optimization System")
 st.markdown("Smart Prediction & Redistribution Platform")
 
@@ -51,7 +50,7 @@ st.markdown("Smart Prediction & Redistribution Platform")
 # -----------------------------
 # NGO Static Location Data
 # -----------------------------
-ngo_locations = pd.DataFrame({
+go_locations = pd.DataFrame({
     "ngo_name": ["Helping Hands", "Food For All", "Care & Share"],
     "lat": [19.0760, 19.2183, 19.0330],
     "lon": [72.8777, 72.9781, 72.8650],
@@ -59,10 +58,39 @@ ngo_locations = pd.DataFrame({
 })
 
 # -----------------------------
-# Load Datasets
+# Load Datasets with Error Handling
 # -----------------------------
-food = pd.read_csv("food_data.csv")
-ngo = pd.read_csv("ngo_data.csv")
+try:
+    food = pd.read_csv("food_data.csv")
+    ngo = pd.read_csv("ngo_data.csv")
+except FileNotFoundError as e:
+    st.error(f"❌ Error: Required data files not found - {e}")
+    st.stop()
+except Exception as e:
+    st.error(f"❌ Error loading datasets: {e}")
+    st.stop()
+
+# Validate required columns
+required_food_cols = ["Event_Type", "Surplus_kg", "Spoilage"]
+if not all(col in food.columns for col in required_food_cols):
+    st.error(f"❌ Error: food_data.csv missing required columns: {required_food_cols}")
+    st.stop()
+
+# Check for latitude/longitude columns (case-insensitive)
+lat_col = next((col for col in ngo.columns if col.lower() == "latitude"), None)
+lon_col = next((col for col in ngo.columns if col.lower() == "longitude"), None)
+
+if lat_col is None or lon_col is None:
+    st.error("❌ Error: ngo_data.csv must contain 'latitude' and 'longitude' columns")
+    st.stop()
+
+# Normalize column names for consistency
+ngo.rename(columns={lat_col: "latitude", lon_col: "longitude"}, inplace=True)
+
+# Check for NGO name column
+ngo_name_col = next((col for col in ngo.columns if col.lower() in ["ngo_name", "name"]), None)
+if ngo_name_col:
+    ngo.rename(columns={ngo_name_col: "ngo_name"}, inplace=True)
 
 # -----------------------------
 # Preprocessing
@@ -82,41 +110,51 @@ _, _, y_train_clf, y_test_clf = train_test_split(
 )
 
 # -----------------------------
-# Train Models
+# Train Models with Caching
 # -----------------------------
-reg_model = LinearRegression()
-reg_model.fit(X_train, y_train_reg)
+@st.cache_resource
+def train_models():
+    """Train ML models with caching to avoid retraining on every rerun"""
+    reg_model = LinearRegression()
+    reg_model.fit(X_train, y_train_reg)
+    
+    clf_model = DecisionTreeClassifier()
+    clf_model.fit(X_train, y_train_clf)
+    
+    return reg_model, clf_model
 
-clf_model = DecisionTreeClassifier()
-clf_model.fit(X_train, y_train_clf)
+reg_model, clf_model = train_models()
 
 # -----------------------------
 # KMeans for NGO Clustering
 # -----------------------------
-kmeans = KMeans(n_clusters=2, random_state=42)
-ngo["Cluster"] = kmeans.fit_predict(ngo[["Latitude", "Longitude"]])
+@st.cache_resource
+def cluster_ngos():
+    """Cluster NGO locations with caching"""
+    kmeans = KMeans(n_clusters=2, random_state=42)
+    clusters = kmeans.fit_predict(ngo[["latitude", "longitude"]])
+    return clusters
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.set_page_config(page_title="Food Waste AI", layout="centered")
+ngo["Cluster"] = cluster_ngos()
 
 # -----------------------------
 # User Inputs
 # -----------------------------
+st.markdown("### 📝 Enter Event Details")
 event = st.selectbox("Event Type", food["Event_Type"].unique())
 guests = st.number_input("Number of Guests", min_value=50, max_value=1000)
 food_prepared = st.number_input("Food Prepared (kg)", min_value=10, max_value=500)
 temp = st.number_input("Temperature (°C)", min_value=20, max_value=45)
 hours = st.number_input("Hours Passed", min_value=1, max_value=12)
 
-event_lat = st.number_input("📍 Event Latitude", value=19.1000)
-event_lon = st.number_input("📍 Event Longitude", value=72.9000)
+st.markdown("### 📍 Enter Event Location")
+event_lat = st.number_input("Event Latitude", value=19.1000, format="%.4f")
+event_lon = st.number_input("Event Longitude", value=72.9000, format="%.4f")
 
 # -----------------------------
 # Prediction Button
 # -----------------------------
-if st.button("Predict"):
+if st.button("🔮 Predict", use_container_width=True):
 
     # Prepare input dictionary
     input_dict = {
@@ -135,23 +173,30 @@ if st.button("Predict"):
     input_df = input_df[X.columns]
 
     # Predictions
-    surplus = reg_model.predict(input_df)[0]
-    spoilage = clf_model.predict(input_df)[0]
+    try:
+        surplus = reg_model.predict(input_df)[0]
+        spoilage = clf_model.predict(input_df)[0]
+    except Exception as e:
+        st.error(f"❌ Error during prediction: {e}")
+        st.stop()
 
     # -----------------------------
     # Display Results
     # -----------------------------
     col1, col2 = st.columns(2)
-    col1.metric("📈 Predicted Surplus (kg)", f"{surplus:.2f}")
-    risk_text = "High" if spoilage == 1 else "Low"
-    col2.metric("⚠ Spoilage Risk", risk_text)
+    with col1:
+        st.metric("📈 Predicted Surplus (kg)", f"{surplus:.2f}")
+    with col2:
+        risk_text = "🔴 High" if spoilage == 1 else "🟢 Low"
+        st.metric("⚠️ Spoilage Risk", risk_text)
 
     st.markdown("### 📊 Surplus Level Indicator")
-    st.progress(min(int(surplus), 100))
+    progress_val = min(max(int(surplus), 0), 100)
+    st.progress(progress_val / 100.0)
 
     # Bar Chart
     st.markdown("### 📊 Surplus Visualization")
-    st.bar_chart([surplus])
+    st.bar_chart(pd.DataFrame({"Surplus (kg)": [surplus]}))
 
     # -----------------------------
     # Find Nearest NGO
@@ -161,26 +206,29 @@ if st.button("Predict"):
     user_location = (event_lat, event_lon)
 
     def find_nearest_ngo(user_location):
+        """Find the nearest NGO based on user location"""
         lat1, lon1 = user_location
-
-        ngo_locations["distance"] = np.sqrt(
-            (ngo_locations["lat"] - lat1) ** 2 +
-            (ngo_locations["lon"] - lon1) ** 2
+        
+        ngo_locations_copy = ngo_locations.copy()
+        ngo_locations_copy["distance"] = np.sqrt(
+            (ngo_locations_copy["lat"] - lat1) ** 2 +
+            (ngo_locations_copy["lon"] - lon1) ** 2
         )
 
-        nearest = ngo_locations.loc[ngo_locations["distance"].idxmin()]
+        nearest = ngo_locations_copy.loc[ngo_locations_copy["distance"].idxmin()]
         return nearest
 
     nearest_ngo = find_nearest_ngo(user_location)
 
-    st.success(f"🏢 NGO Name: {nearest_ngo['ngo_name']}")
-    st.info(f"📞 Contact Number: {nearest_ngo['phone']}")
-    st.write(f"📍 Distance: {nearest_ngo['distance']:.4f} units")
+    st.success(f"🏢 NGO Name: **{nearest_ngo['ngo_name']}**")
+    st.info(f"📞 Contact Number: **{nearest_ngo['phone']}**")
+    st.write(f"📍 Distance: **{nearest_ngo['distance']:.4f}** units")
 
     # Map - Nearest NGO
     nearest_map = pd.DataFrame({
-        "latitude": [nearest_ngo["lat"]],
-        "longitude": [nearest_ngo["lon"]]
+        "latitude": [nearest_ngo["lat}],
+        "longitude": [nearest_ngo["lon"]],
+        "name": ["Nearest NGO"]
     })
 
     st.markdown("### 📍 Nearest NGO Location")
@@ -188,25 +236,35 @@ if st.button("Predict"):
 
     # Map - All NGOs
     st.markdown("### 📍 All NGO Locations")
-    st.map(ngo_locations.rename(columns={"lat": "latitude", "lon": "longitude"}))
+    all_ngos_map = ngo_locations.copy()
+    all_ngos_map.rename(columns={"lat": "latitude", "lon": "longitude"}, inplace=True)
+    st.map(all_ngos_map)
 
     # -----------------------------
     # Action Suggestions
     # -----------------------------
+    st.markdown("---")
     if spoilage == 1:
-        st.error("🚨 High Spoilage Risk! Immediate Redistribution Required.")
+        st.error("🚨 HIGH SPOILAGE RISK! IMMEDIATE REDISTRIBUTION REQUIRED")
         st.markdown("### 🚚 Suggested Action:")
-        st.markdown("- Contact nearest NGO immediately")
-        st.markdown("- Arrange transport within 1 hour")
-        st.markdown("- Avoid storing at room temperature")
+        st.markdown("- ⏰ Contact nearest NGO **immediately**")
+        st.markdown("- 🚗 Arrange transport within **1 hour**")
+        st.markdown("- ❄️ Avoid storing at **room temperature**")
+        st.markdown("- 📦 Use **refrigerated containers** if available")
     else:
-        st.success("✅ Low Spoilage Risk. Safe for Redistribution.")
+        st.success("✅ LOW SPOILAGE RISK - Safe for Redistribution")
         st.markdown("### 📦 Suggested Action:")
-        st.markdown("- Safe to distribute within next few hours")
-        st.markdown("- Maintain hygienic storage conditions")
+        st.markdown("- ✓ Safe to distribute within the **next few hours**")
+        st.markdown("- ✓ Maintain **hygienic storage conditions**")
+        st.markdown("- ✓ Keep in **cool, shaded area**")
+        st.markdown("- ✓ Schedule pickup with NGO at your convenience")
 
+    # Display NGO Clusters if data exists
+    if "ngo_name" in ngo.columns:
         st.subheader("📍 NGO Clusters:")
-        st.write(ngo.groupby("Cluster")["NGO_Name"].apply(list))
-
-
-
+        try:
+            cluster_groups = ngo.groupby("Cluster")["ngo_name"].apply(list).to_dict()
+            for cluster_id, ngo_names in cluster_groups.items():
+                st.write(f"**Cluster {cluster_id}:** {', '.join(ngo_names)}")
+        except Exception as e:
+            st.warning(f"⚠️ Could not display NGO clusters: {e}")
