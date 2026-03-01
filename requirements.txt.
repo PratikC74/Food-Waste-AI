@@ -2,5 +2,5 @@ streamlit
 pandas
 numpy
 scikit-learn
-matplotlib
+matplotlib==3.8.0
 reportlab
